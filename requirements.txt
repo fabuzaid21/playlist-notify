@@ -1,0 +1,9 @@
+future==0.15.2
+httplib2==0.9.2
+oauthlib==1.1.2
+pytz==2016.10
+requests==2.10.0
+requests-oauthlib==0.6.2
+six==1.10.0
+spotipy==2.3.8
+twilio==5.6.0
