@@ -29,12 +29,14 @@ PLAYLISTS = ['Firas & Samra: Day', 'Firas & Samra: Night']
 PREV_PLAYLISTS_INFO_FILE='.playlist-notify'
 
 # Return all tracks and the snapshot id for a given playlist id. The tracks are
-# returned as a list of 2-tuples:
-# (track id, 'added_by', username who added track)
+# returned as a set of 2-tuples:
+# (track id, username who added track)
+# We don't care about the order of the songs in the playlist; we only care
+# what songs are present, and which user added the song
 def get_playlist_tracks_and_snapshot(spotify_api, user_id, playlist_id):
     playlist_info = spotify_api.user_playlist(user_id, playlist_id)
-    return ([(t['track']['id'], t['added_by']['id']) for t in
-        playlist_info['tracks']['items']], playlist_info['snapshot_id'])
+    return (set((t['track']['id'], t['added_by']['id']) for t in
+        playlist_info['tracks']['items']), playlist_info['snapshot_id'])
 
 # Assumes PREV_PLAYLISTS_INFO_FILE doesn't exist; searches through all of
 # user's playlists to find the playlist id, snapshot id, and URL of the
@@ -113,32 +115,32 @@ will be alerted via text message to the following number:\n%s
             twilio_api = TwilioRestClient(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
             for playlist_name, info in curr_playlists_info.iteritems():
                 print 'Checking for any updates to "%s"' % playlist_name
-                tracks, snapshot_id = get_playlist_tracks_and_snapshot(spotify_api, \
+
+                old_tracks = info['tracks']
+                new_tracks, snapshot_id = get_playlist_tracks_and_snapshot(spotify_api, \
                         info['owner'], info['id'])
                 if snapshot_id == info['snapshot_id']:
                     print 'No updates found for "%s"\n' % playlist_name
                     continue
 
                 curr_playlists_info[playlist_name]['snapshot_id'] = snapshot_id
-                if len(tracks) == len(info['tracks']):
-                    print '"%s" was re-ordered; no new songs added\n' % playlist_name
-                    curr_playlists_info[playlist_name]['tracks'] = tracks
-                    continue
 
-                # For now, assume new tracks are added at the end
-                num_new_tracks = len(tracks) - len(info['tracks'])
+                # Latest version of playlist has different tracks than the
+                # previously saved version, but tracks may have been removed,
+                # or we may have been the one adding these new tracks
+                delta_tracks = new_tracks.difference(old_tracks)
                 send_update = False
-                for track in tracks[-num_new_tracks:]:
-                    if track[1] != TARGET_USERNAME:
+                for _, added_by in delta_tracks:
+                    if added_by != TARGET_USERNAME:
                         send_update = True
                         break
 
-                curr_playlists_info[playlist_name]['tracks'] = tracks
+                curr_playlists_info[playlist_name]['tracks'] = new_tracks
 
                 if send_update:
                     message_body = '%s added new songs to "%s"; have a listen: %s' % \
                         (SPOTIFY_USERNAME, playlist_name, info['url'])
-                    print 'Sending \'%s\' to %s\n' % (message_body, TARGET_PHONE_NUMBER)
+                    print 'Sending "%s" to %s\n' % (message_body, TARGET_PHONE_NUMBER)
                     message = twilio_api.messages.create(body=message_body,
                         to=TARGET_PHONE_NUMBER,
                         from_=TWILIO_NUMBER)
