@@ -4,7 +4,7 @@ import re
 import cPickle as pickle
 from os import path, getenv
 import spotipy
-import spotipy.util as util
+import util
 import argparse
 from time import sleep
 from twilio.rest import TwilioRestClient
@@ -86,62 +86,66 @@ if __name__ == '__main__':
     TARGET_PHONE_NUMBER = args.phone_number
     TARGET_USERNAME = args.username
 
-    spotify_token = util.prompt_for_user_token(SPOTIFY_USERNAME,
+    sp_oauth = util.prompt_for_user_authentication(SPOTIFY_USERNAME,
             scope=SPOTIFY_API_SCOPE, client_id=SPOTIFY_CLIENT_ID,
             client_secret=SPOTIFY_CLIENT_SECRET,
             redirect_uri=SPOTIFY_REDIRECT_URI)
+    while True:
 
-    if spotify_token:
-        print '''
-Polling for updates for %s; any changes to the following playlists:\n\n%s\n
+        spotify_token = sp_oauth.get_cached_token()['access_token']
+        if not spotify_token:
+            print 'Unable to acquire Spotify token; restart script'
+            break
+
+        print '''Polling for updates for %s; any changes to the following playlists:\n\n%s\n
 will be alerted via text message to the following number:\n%s
         ''' % (TARGET_USERNAME, '\n'.join(PLAYLISTS), TARGET_PHONE_NUMBER)
         spotify_api = spotipy.Spotify(auth=spotify_token)
-        while True:
-            if not path.isfile(PREV_PLAYLISTS_INFO_FILE):
-                print '%s doesn\'t exist; initializing from scratch' % PREV_PLAYLISTS_INFO_FILE
-                curr_playlists_info = initialize_playlists_info(spotify_api)
-                with open(PREV_PLAYLISTS_INFO_FILE, 'w') as f:
-                    pickle.dump(curr_playlists_info, f)
 
-            else:
-                curr_playlists_info = get_saved_playlists_info()
-                twilio_api = TwilioRestClient(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-                for playlist_name, info in curr_playlists_info.iteritems():
-                    print 'Checking for any updates to "%s"' % playlist_name
-                    tracks, snapshot_id = get_playlist_tracks_and_snapshot(spotify_api, \
-                            info['owner'], info['id'])
-                    if snapshot_id == info['snapshot_id']:
-                        print 'No updates found for "%s"\n' % playlist_name
-                        continue
+        if not path.isfile(PREV_PLAYLISTS_INFO_FILE):
+            print '%s doesn\'t exist; initializing from scratch' % PREV_PLAYLISTS_INFO_FILE
+            curr_playlists_info = initialize_playlists_info(spotify_api)
+            with open(PREV_PLAYLISTS_INFO_FILE, 'w') as f:
+                pickle.dump(curr_playlists_info, f)
 
-                    curr_playlists_info[playlist_name]['snapshot_id'] = snapshot_id
-                    if len(tracks) == len(info['tracks']):
-                        print '"%s" was re-ordered; no new songs added\n' % playlist_name
-                        curr_playlists_info[playlist_name]['tracks'] = tracks
-                        continue
+        else:
+            curr_playlists_info = get_saved_playlists_info()
+            twilio_api = TwilioRestClient(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+            for playlist_name, info in curr_playlists_info.iteritems():
+                print 'Checking for any updates to "%s"' % playlist_name
+                tracks, snapshot_id = get_playlist_tracks_and_snapshot(spotify_api, \
+                        info['owner'], info['id'])
+                if snapshot_id == info['snapshot_id']:
+                    print 'No updates found for "%s"\n' % playlist_name
+                    continue
 
-                    # For now, assume new tracks are added at the end
-                    num_new_tracks = len(tracks) - len(info['tracks'])
-                    send_update = False
-                    for track in tracks[-num_new_tracks:]:
-                        if track[1] != TARGET_USERNAME:
-                            send_update = True
-                            break
-
+                curr_playlists_info[playlist_name]['snapshot_id'] = snapshot_id
+                if len(tracks) == len(info['tracks']):
+                    print '"%s" was re-ordered; no new songs added\n' % playlist_name
                     curr_playlists_info[playlist_name]['tracks'] = tracks
+                    continue
 
-                    if send_update:
-                        message_body = '%s added new songs to "%s"; have a listen: %s' % \
-                            (SPOTIFY_USERNAME, playlist_name, info['url'])
-                        print 'Sending \'%s\' to %s\n' % (message_body, TARGET_PHONE_NUMBER)
-                        message = twilio_api.messages.create(body=message_body,
-                            to=TARGET_PHONE_NUMBER,
-                            from_=TWILIO_NUMBER)
+                # For now, assume new tracks are added at the end
+                num_new_tracks = len(tracks) - len(info['tracks'])
+                send_update = False
+                for track in tracks[-num_new_tracks:]:
+                    if track[1] != TARGET_USERNAME:
+                        send_update = True
+                        break
 
-                with open(PREV_PLAYLISTS_INFO_FILE, 'w') as f:
-                    pickle.dump(curr_playlists_info, f)
+                curr_playlists_info[playlist_name]['tracks'] = tracks
 
-            print 'Checking again in 1 minute\n'
-            sleep(60) # sleep for 60 seconds then try again
+                if send_update:
+                    message_body = '%s added new songs to "%s"; have a listen: %s' % \
+                        (SPOTIFY_USERNAME, playlist_name, info['url'])
+                    print 'Sending \'%s\' to %s\n' % (message_body, TARGET_PHONE_NUMBER)
+                    message = twilio_api.messages.create(body=message_body,
+                        to=TARGET_PHONE_NUMBER,
+                        from_=TWILIO_NUMBER)
+
+            with open(PREV_PLAYLISTS_INFO_FILE, 'w') as f:
+                pickle.dump(curr_playlists_info, f)
+
+        print 'Checking again in 1 minute\n'
+        sleep(60) # sleep for 60 seconds then try again
 
