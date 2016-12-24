@@ -23,20 +23,28 @@ SPOTIFY_API_SCOPE='''
 playlist-read-collaborative
 '''
 
-PLAYLISTS = ['Firas & Samra: Day', 'Firas & Samra: Night']
+PLAYLISTS = set(['Firas & Samra: Day', 'Firas & Samra: Night'])
 
 
 PREV_PLAYLISTS_INFO_FILE='.playlist-notify'
 
-# Return all tracks and the snapshot id for a given playlist id. The tracks are
-# returned as a set of 2-tuples:
-# (track id, username who added track)
+# Return a 2-tuple: 1) all tracks and 2) the snapshot id for a given playlist
+# id. The tracks are returned as a set of 3-tuples:
+# (track id, track name, user who added track)
 # We don't care about the order of the songs in the playlist; we only care
 # what songs are present, and which user added the song
 def get_playlist_tracks_and_snapshot(spotify_api, user_id, playlist_id):
     playlist_info = spotify_api.user_playlist(user_id, playlist_id)
-    return (set((t['track']['id'], t['added_by']['id']) for t in
-        playlist_info['tracks']['items']), playlist_info['snapshot_id'])
+    return (set(
+                (
+                 t['track']['id'],
+                 t['track']['name'],
+                 t['added_by']['id']
+                )
+                for t in playlist_info['tracks']['items']
+               ),
+            playlist_info['snapshot_id']
+           )
 
 # Assumes PREV_PLAYLISTS_INFO_FILE doesn't exist; searches through all of
 # user's playlists to find the playlist id, snapshot id, and URL of the
@@ -49,12 +57,12 @@ def initialize_playlists_info(spotify_api):
         for playlist in user_playlists['items']:
             if playlist['name'] in PLAYLISTS:
                 playlists_info[playlist['name']] = {
-                        'id': playlist['id'],
-                        'owner': playlist['owner']['id'],
-                        'snapshot_id': playlist['snapshot_id'],
-                        'tracks': get_playlist_tracks_and_snapshot(spotify_api,
-                            playlist['owner']['id'], playlist['id'])[0],
-                        'url': playlist['external_urls']['spotify']
+                         'id': playlist['id'],
+                         'owner': playlist['owner']['id'],
+                         'snapshot_id': playlist['snapshot_id'],
+                         'tracks': get_playlist_tracks_and_snapshot(spotify_api,
+                             playlist['owner']['id'], playlist['id'])[0],
+                         'url': playlist['external_urls']['spotify']
                         }
                 if len(playlists_info) == len(PLAYLISTS):
                     break
@@ -70,6 +78,8 @@ def get_saved_playlists_info():
         playlists_info = pickle.load(f)
         return playlists_info
 
+# Validate that user passed in a valid U.S. phone number in the command-line
+# arguments
 def check_phone_number(phone_number):
     if not re.match(r'\+1\d{10}', phone_number):
         raise argparse.ArgumentTypeError('%s is not a valid U.S. phone number' % phone_number)
@@ -92,8 +102,8 @@ if __name__ == '__main__':
             scope=SPOTIFY_API_SCOPE, client_id=SPOTIFY_CLIENT_ID,
             client_secret=SPOTIFY_CLIENT_SECRET,
             redirect_uri=SPOTIFY_REDIRECT_URI)
-    while True:
 
+    while True:
         spotify_token = sp_oauth.get_cached_token()['access_token']
         if not spotify_token:
             print 'Unable to acquire Spotify token; restart script'
@@ -129,21 +139,16 @@ will be alerted via text message to the following number:\n%s
                 # previously saved version, but tracks may have been removed,
                 # or we may have been the one adding these new tracks
                 delta_tracks = new_tracks.difference(old_tracks)
-                send_update = False
-                for _, added_by in delta_tracks:
+                for _, track_name, added_by in delta_tracks:
                     if added_by != TARGET_USERNAME:
-                        send_update = True
-                        break
+                        message_body = u'Listen up! \U0001f3a7\U0001f60a %s added "%s" to "%s": %s' % \
+                            (added_by, track_name, playlist_name, info['url'])
+                        print 'Sending \n%s\n to %s\n' % (message_body, TARGET_PHONE_NUMBER)
+                        message = twilio_api.messages.create(body=message_body,
+                            to=TARGET_PHONE_NUMBER,
+                            from_=TWILIO_NUMBER)
 
                 curr_playlists_info[playlist_name]['tracks'] = new_tracks
-
-                if send_update:
-                    message_body = '%s added new songs to "%s"; have a listen: %s' % \
-                        (SPOTIFY_USERNAME, playlist_name, info['url'])
-                    print 'Sending "%s" to %s\n' % (message_body, TARGET_PHONE_NUMBER)
-                    message = twilio_api.messages.create(body=message_body,
-                        to=TARGET_PHONE_NUMBER,
-                        from_=TWILIO_NUMBER)
 
             with open(PREV_PLAYLISTS_INFO_FILE, 'w') as f:
                 pickle.dump(curr_playlists_info, f)
