@@ -33,18 +33,25 @@ PREV_PLAYLISTS_INFO_FILE='.playlist-notify'
 # (track id, track name, user who added track)
 # We don't care about the order of the songs in the playlist; we only care
 # what songs are present, and which user added the song
-def get_playlist_tracks_and_snapshot(spotify_api, user_id, playlist_id):
+def get_playlist_tracks_and_snapshot(spotify_api, user_id, playlist_id,
+        fields=['snapshot_id']):
     playlist_info = spotify_api.user_playlist(user_id, playlist_id)
-    return (set(
-                (
-                 t['track']['id'],
-                 t['track']['name'],
-                 t['added_by']['id']
-                )
-                for t in playlist_info['tracks']['items']
-               ),
-            playlist_info['snapshot_id']
-           )
+    tracks = set(
+                (t['track']['id'], t['track']['name'], t['added_by']['id'])
+                    for t in playlist_info['tracks']['items']
+             )
+    snapshot_id = playlist_info['snapshot_id']
+    offset = len(tracks)
+    next = playlist_info['tracks']['next']
+    while next:
+        additional_tracks = spotify_api.user_playlist_tracks(user_id, playlist_id,
+                offset=offset)
+        offset += len(additional_tracks['items'])
+        for t in additional_tracks['items']:
+          tracks.add((t['track']['id'], t['track']['name'], t['added_by']['id']))
+        next = additional_tracks['next']
+
+    return (tracks, snapshot_id)
 
 # Assumes PREV_PLAYLISTS_INFO_FILE doesn't exist; searches through all of
 # user's playlists to find the playlist id, snapshot id, and URL of the
@@ -134,6 +141,7 @@ will be alerted via text message to the following number:\n%s
                     continue
 
                 curr_playlists_info[playlist_name]['snapshot_id'] = snapshot_id
+                print len(new_tracks) - len(old_tracks)
 
                 # Latest version of playlist has different tracks than the
                 # previously saved version, but tracks may have been removed,
