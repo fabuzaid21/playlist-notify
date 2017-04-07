@@ -161,6 +161,6 @@ will be alerted via text message to the following number:\n%s
             with open(PREV_PLAYLISTS_INFO_FILE, 'w') as f:
                 pickle.dump(curr_playlists_info, f)
 
-        print 'Checking again in 1 minute\n'
-        sleep(60) # sleep for 60 seconds then try again
+        print 'Checking again in 2 minutes\n'
+        sleep(120) # sleep for 120 seconds then try again
 
